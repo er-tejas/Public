@@ -1,0 +1,143 @@
+*** Settings ***
+Documentation     Orders robots from RobotSpareBin Industries Inc.
+...               Saves the order HTML receipt as a PDF file.
+...               Saves the screenshot of the ordered robot.
+...               Embeds the screenshot of the robot to the PDF receipt.
+...               Creates ZIP archive of the receipts and the images.
+Library    RPA.Browser.Selenium    #auto_close=${FALSE}
+Library    RPA.Excel.Files
+Library    RPA.HTTP
+Library    RPA.PDF
+Library    RPA.Tables
+Library    RPA.Tables
+Library    RPA.Archive
+Library    RPA.Dialogs
+Library    RPA.Robocorp.Vault
+Library    RPA.Robocorp.Process
+Library    RPA.FileSystem
+Library    RPA.RobotLogListener
+Library    RPA
+*** Variables ***
+*** Tasks ***
+Order robots from RobotSpareBin Industries Inc
+    # Download the orders file
+    Open the website
+    Fill the form using the data from the orders file
+    Create ZIP
+    [Teardown]    Remove Temp Files
+*** Keywords ***
+Get App URL from valult
+    ${secret}=    Get Secret    vault
+    Return From Keyword    ${secret}[appUrl]
+Get File Path from valult
+    ${secret}=    Get Secret    vault
+    Return From Keyword    ${secret}[inputFileUrl]
+Download the orders file
+    ${url}=    Get File Path from valult
+    Remove File    orders.csv    
+    # Download    https://robotsparebinindustries.com/orders.csv    overwrite=True
+    Download    ${url}    overwrite=True
+Open the website
+    ${url}=    Get App URL from valult
+    # Open Available Browser    https://robotsparebinindustries.com/#/robot-order
+    Open Available Browser    ${url}
+    # Maximize Browser Window
+Fill the form using the data from the orders file
+    ${robot_orders} =    Read table from CSV    orders.csv    true
+  
+    Set Local Variable    ${error_message}    ''
+    FOR    ${robot_order}    IN    @{robot_orders}
+        # TRY
+            Another Order 
+            Accept Popup
+            Fill form for one robot    ${robot_order}
+            Preview Order
+            Submit Order
+            Set Local Variable    ${order_number}    ${robot_order}[Order number]
+            Set Local Variable    ${receipt_file_Name}    Receipt_
+            ${receipt_file_Name}=    Catenate   SEPARATOR=    ${receipt_file_Name}       ${order_number}    .pdf
+            Save PDF Output    ${receipt_file_Name}
+        # EXCEPT    AS    ${error_message}
+        #     Log    ${error_message}    
+        # END
+    END
+Accept Popup
+    # Wait Until Element Is Visible    //button[text()='OK']    1s
+    ${IsPopupVisible}    Is Element Visible    //button[text()='OK']
+    IF    ${IsPopupVisible}
+        Click Button    //button[text()='OK']
+    END
+    # Wait Until Element Is Not Visible    //button[text()='OK']
+Another Order
+    ${IsAnotherOrderBtnVisible}    Is Element Visible    order-another
+    IF    ${IsAnotherOrderBtnVisible}
+        Click Element    order-another
+    END
+    # Wait Until Element Is Not Visible    order-another
+Fill form for one robot
+    [Arguments]    ${robot_order}
+    # Wait Until Element Is Visible    address    1s
+    # Convert To Integer    ${robot_order}[Head]
+    Select From List By Index    head    ${robot_order}[Head]
+    # Sleep    2s    To check ui
+    # Select Radio Button    group_name    value
+    Set Local Variable    ${bodyId}    id-body-
+    ${bodyId} =    Catenate    SEPARATOR=    ${bodyId}    ${robot_order}[Body]    
+    Click Element    ${bodyId}
+    Input Text    xpath://input[contains(@placeholder,'Enter the part number for the legs')]    ${robot_order}[Legs]
+    Input Text    address    ${robot_order}[Address]
+  
+    # ${bot_image}=    Get Element Attribute    id:robot-preview-image    outerHTML
+    # Click Button    order
+    # Return From Keyword    ${bot_image}
+Preview Order
+    # Wait Until Element Is Visible    preview    1s
+    Click Button    preview
+Submit Order
+    # Wait Until Element Is Visible    order    1s
+    ${attempt_list}=    Create List    1    2    3    4    5
+    FOR    ${attempt}    IN    @{attempt_list}
+        Click Button    order
+        # Mute Run On Failure    Wait Until Element Is Visible    receipt    1s
+        ${IsReceiptVisible}=    Is Element Visible    receipt
+        ${IsErrorVisible}=    Is Element Visible    xpath://div[@class='alert alert-danger']            
+        IF    ${IsReceiptVisible}
+            # ${receipt_html}=    Get Element Attribute    id:receipt    outerHTML
+            # Save PDF Output    ${receipt_file_Name}    ${receipt_html}        ${bot_image}
+            Exit For Loop
+        END
+        IF    ${IsErrorVisible}
+            # ${sales_results_html}=    Get Element Text    xpath://div[@class='alert alert-danger']
+            ${ErrorMessage}=    Get Element Attribute    xpath://div[@class='alert alert-danger']    innerText
+            Log    ${ErrorMessage}
+        END
+    END
+# Check If Submitted
+#     ${IsReceiptVisible}    Is Element Visible    receipt
+#     Return From Keyword    ${IsReceiptVisible}
+Save PDF Output
+    [Arguments]    ${receipt_file_Name}
+    # Wait Until Element Is Visible    id:robot-preview-image    1s
+    Remove Files    ${OUTPUT_DIR}${/}pdf_receipt.png    ${OUTPUT_DIR}${/}pdf_bot.png
+    # Screenshot    
+    # Html To Pdf    content    ${OUTPUT_DIR}${/}pdf_receipt.pdf
+    Screenshot    id:receipt    ${OUTPUT_DIR}${/}pdf_receipt.png
+    Screenshot    id:robot-preview-image    ${OUTPUT_DIR}${/}pdf_bot.png
+    # Capture Element Screenshot    id:robot-preview-image    ${OUTPUT_DIR}${/}pdf_bot.pdf
+    ${DirNotExists}=    Does Directory Not Exist    ${OUTPUT_DIR}${/}Receipts
+    IF    ${DirNotExists}
+        Create Directory    ${OUTPUT_DIR}${/}Receipts
+    END   
+    ${files}=    Create List    ${OUTPUT_DIR}${/}pdf_receipt.png    ${OUTPUT_DIR}${/}pdf_bot.png
+    Add Files To Pdf    ${files}    ${OUTPUT_DIR}${/}Receipts${/}${receipt_file_Name}
+    [Teardown]    Remove Files    ${OUTPUT_DIR}${/}pdf_receipt.png    ${OUTPUT_DIR}${/}pdf_bot.png
+Create ZIP
+    Remove File    ${OUTPUT_DIR}${/}Receipts.zip
+    Archive Folder With Zip    ${OUTPUT_DIR}${/}Receipts    ${OUTPUT_DIR}${/}Receipts.zip
+Remove Temp Files
+    Remove File    orders.csv
+    Remove Directory    ${OUTPUT_DIR}${/}Receipts    True
+    [Teardown]   Close the browser
+Close the browser
+    Close Browser
+
